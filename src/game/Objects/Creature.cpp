@@ -179,7 +179,7 @@ Creature::Creature(CreatureSubtype subtype) :
     m_HomeX(0.0f), m_HomeY(0.0f), m_HomeZ(0.0f), m_HomeOrientation(0.0f), m_reactState(REACT_PASSIVE),
     m_CombatDistance(0.0f), _lastDamageTakenForEvade(0), _playerDamageTaken(0), _nonPlayerDamageTaken(0), m_creatureInfo(nullptr),
     m_AI_InitializeOnRespawn(false), m_callForHelpDist(5.0f), m_combatWithZoneState(false), m_startwaypoint(0), m_mountId(0),
-    _isEscortable(false), m_reputationId(-1)
+    _isEscortable(false), m_reputationId(-1), _hasDied(false), _hasDiedAndRespawned(false)
 {
     m_regenTimer = 200;
     m_valuesCount = UNIT_END;
@@ -803,7 +803,7 @@ void Creature::Update(uint32 update_diff, uint32 diff)
             // Raid bosses do a periodic combat pulse
             if (m_combatState && m_combatWithZoneState)
             {
-                if (WorldTimer::tickTime() % 3000 <= update_diff)
+                if (GetMap()->GetLastMapUpdate() % 3000 <= update_diff)
                     SetInCombatWithZone(false);
             }
 
@@ -1343,6 +1343,22 @@ bool Creature::IsTappedBy(Player const* player) const
     return true;
 }
 
+bool Creature::CanHaveLoot(Player const* player) const
+{
+    if (auto map = FindMap())
+    {
+        if (map->IsDungeon())
+        {
+            if (_hasDiedAndRespawned && GetCreatureInfo()->flags_extra & CREATURE_FLAG_EXTRA_SINGLE_LOOT_GENERATION)
+            {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
 void Creature::SaveToDB()
 {
     // this should only be used when the creature has already been loaded
@@ -1680,12 +1696,6 @@ void Creature::LoadEquipment(uint32 equip_entry, bool force)
         for (uint8 i = 0; i < MAX_VIRTUAL_ITEM_SLOT; ++i)
             SetVirtualItem(VirtualItemSlot(i), einfo->equipentry[i]);
     }
-    else if (EquipmentInfoRaw const *einfo = sObjectMgr.GetEquipmentInfoRaw(equip_entry))
-    {
-        m_equipmentId = equip_entry;
-        for (uint8 i = 0; i < MAX_VIRTUAL_ITEM_SLOT; ++i)
-            SetVirtualItemRaw(VirtualItemSlot(i), einfo->equipmodel[i], einfo->equipinfo[i], einfo->equipslot[i]);
-    }
 }
 
 bool Creature::HasQuest(uint32 quest_id) const
@@ -1800,6 +1810,7 @@ void Creature::SetDeathState(DeathState s)
 {
     if ((s == JUST_DIED && !m_isDeadByDefault) || (s == JUST_ALIVED && m_isDeadByDefault))
     {
+        _hasDied = true;
         auto data = sObjectMgr.GetCreatureData(GetGUIDLow());
 
         uint32 respawnDelay = m_respawnDelay;
@@ -1932,6 +1943,9 @@ void Creature::Respawn()
 
     if (CreatureGroup* group = GetCreatureGroup())
         group->OnRespawn(this);
+
+    if (_hasDied)
+        _hasDiedAndRespawned = true;
 }
 
 void Creature::ForcedDespawn(uint32 timeMSToDespawn)
@@ -3885,16 +3899,6 @@ void Creature::SetVirtualItem(VirtualItemSlot slot, uint32 item_id)
     SetByteValue(UNIT_VIRTUAL_ITEM_INFO + (slot * 2) + 0, VIRTUAL_ITEM_INFO_0_OFFSET_INVENTORYTYPE, proto->InventoryType);
 
     SetByteValue(UNIT_VIRTUAL_ITEM_INFO + (slot * 2) + 1, VIRTUAL_ITEM_INFO_1_OFFSET_SHEATH,        proto->Sheath);
-}
-
-void Creature::SetVirtualItemRaw(VirtualItemSlot slot, uint32 display_id, uint32 info0, uint32 info1)
-{
-    SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_DISPLAY + slot, display_id);
-    SetUInt32Value(UNIT_VIRTUAL_ITEM_INFO + (slot * 2) + 0, info0);
-    SetByteValue(UNIT_VIRTUAL_ITEM_INFO + (slot * 2) + 0, VIRTUAL_ITEM_INFO_0_OFFSET_INVENTORYTYPE, info1);
-
-    // dummy: zero sheath
-    SetUInt32Value(UNIT_VIRTUAL_ITEM_INFO + (slot * 2) + 1, 0);
 }
 
 void Creature::JoinCreatureGroup(Creature* leader, float dist, float angle, uint32 options)

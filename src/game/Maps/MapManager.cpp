@@ -301,14 +301,13 @@ void MapManager::Update(uint32 diff)
     int mapIdx = 0;
     int continentsIdx = 0;
     uint32 now = WorldTimer::getMSTime();
+    uint32 inactiveTimeLimit = sWorld.getConfig(CONFIG_UINT32_EMPTY_MAPS_UPDATE_TIME);
     for (MapMapType::iterator iter = i_maps.begin(); iter != i_maps.end(); ++iter)
     {
         // If this map has been empty for too long, we no longer update it.
-        if (!iter->second->HavePlayers() && sWorld.getConfig(CONFIG_UINT32_EMPTY_MAPS_UPDATE_TIME))
-        {
-            if (WorldTimer::getMSTimeDiff(iter->second->GetLastPlayerLeftTime(), now) > sWorld.getConfig(CONFIG_UINT32_EMPTY_MAPS_UPDATE_TIME))
-                continue;
-        }
+        if (!iter->second->ShouldUpdateMap(now, inactiveTimeLimit))
+            continue;
+
         iter->second->UpdateSync(mapsDiff);
         iter->second->MarkNotUpdated();
         iter->second->SetMapUpdateIndex(-1);
@@ -371,7 +370,7 @@ void MapManager::Update(uint32 diff)
         {
             sZoneScriptMgr.OnMapCrashed(crashedMapsIter->second);
             crashedMapsIter->second->CrashUnload();
-            i_maps.erase(crashedMapsIter++);
+            crashedMapsIter = i_maps.erase(crashedMapsIter);
         }
         else
             ++crashedMapsIter;
@@ -389,7 +388,7 @@ void MapManager::Update(uint32 diff)
             pMap->UnloadAll(true);
             delete pMap;
 
-            i_maps.erase(iter++);
+            iter = i_maps.erase(iter);
         }
         else
             ++iter;

@@ -332,7 +332,6 @@ bool TargetedMovementGeneratorMedium<T, D>::Update(T &owner, const uint32 & time
 
             if (!i_targetReached)
             {
-                i_can_spread = true;
                 i_targetReached = true;
                 static_cast<D*>(this)->_reachTarget(owner);
             }
@@ -341,21 +340,16 @@ bool TargetedMovementGeneratorMedium<T, D>::Update(T &owner, const uint32 & time
         if (interrupted)
             owner.StopMoving();
 
-        if (this->GetMovementGeneratorType() == CHASE_MOTION_TYPE)
+        if (i_recalculateTravel && (this->GetMovementGeneratorType() == CHASE_MOTION_TYPE))
         {
                 i_recheckBoundingRadius.Update(time_diff);
                 if (i_recheckBoundingRadius.Passed())
                 {
-                    i_recheckBoundingRadius.Reset(urand(3000, 3500));
+                    i_recheckBoundingRadius.Reset(3000);
                     if (Creature* creature = owner.ToCreature())
                     {
-                        if (!(creature->GetCreatureInfo()->flags_extra & CREATURE_FLAG_EXTRA_CHASE_GEN_NO_BACKING) && !creature->IsPet() && !i_target.getTarget()->IsMoving())
-                        {
-                            if (i_recalculateTravel && TargetDeepInBounds(owner, i_target.getTarget()))
-                                DoBackMovement(owner, i_target.getTarget());
-                            else if (i_can_spread)
-                                DoSpreadIfNeeded(owner, i_target.getTarget());
-                        }
+                        if (!(creature->GetCreatureInfo()->flags_extra & CREATURE_FLAG_EXTRA_CHASE_GEN_NO_BACKING) && !creature->IsPet() && !i_target.getTarget()->IsMoving() && TargetDeepInBounds(owner, i_target.getTarget()))
+                            DoBackMovement(owner, i_target.getTarget());
                     }
                 }
         }
@@ -414,55 +408,6 @@ void TargetedMovementGeneratorMedium<T, D>::DoBackMovement(T &owner, Unit* targe
         return;
 
     i_backing_up = true;
-    Movement::MoveSplineInit init(owner, "TargetedMovementGenerator");
-    init.MoveTo(x, y, z, MOVE_WALK_MODE);
-    init.SetWalk(true);
-    init.Launch();
-}
-
-template<class T, typename D>
-void TargetedMovementGeneratorMedium<T, D>::DoSpreadIfNeeded(T &owner, Unit* target)
-{
-    // Move away from any NPC deep in our bounding box. There's no limit to the
-    // angle moved; NPCs will eventually start spreading behind the target if
-    // there's enough of them.
-    Unit* spread_from = nullptr;
-
-    for (auto& attacker : target->getAttackers())
-    {
-        if (attacker->IsCreature() && (attacker != &owner) &&
-            (owner.GetObjectBoundingRadius() - 2.0f < attacker->GetObjectBoundingRadius()) &&
-            !attacker->IsMoving() &&
-            (owner.GetDistanceSqr(attacker->GetPositionX(), attacker->GetPositionY(), attacker->GetPositionZ()) < std::min(std::max(owner.GetObjectBoundingRadius(), attacker->GetObjectBoundingRadius()), 0.3f)))
-        {
-            spread_from = attacker;
-            break;
-        }
-    }
-
-    if (!spread_from)
-    {
-        i_can_spread = false;
-        return;
-    }  
-    
-    float my_angle = target->GetAngle(&owner);
-    float his_angle = target->GetAngle(spread_from);
-    float new_angle;
-    if (his_angle > my_angle)
-        new_angle = my_angle - frand(0.4f, 1.0f);
-    else
-        new_angle = my_angle + frand(0.4f, 1.0f);
-    
-    float x, y, z;
-    target->GetClosePoint(x, y, z, target->GetObjectBoundingRadius() + owner.GetObjectBoundingRadius(), frand(0.8f, 1.5f), new_angle - target->GetOrientation(), &owner);
-
-    // Don't move beyond attack range.
-    if (!owner.CanReachWithMeleeAttackAtPosition(target, x, y, z, 0.0f))
-        return;
-
-    i_backing_up = true;
-
     Movement::MoveSplineInit init(owner, "TargetedMovementGenerator");
     init.MoveTo(x, y, z, MOVE_WALK_MODE);
     init.SetWalk(true);

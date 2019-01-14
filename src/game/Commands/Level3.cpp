@@ -338,6 +338,14 @@ bool ChatHandler::HandleReloadQuestGreetingCommand(char* /*args*/)
     return true;
 }
 
+bool ChatHandler::HandleReloadTrainerGreetingCommand(char* /*args*/)
+{
+    sLog.outString("Re-Loading Trainer Greetings...");
+    sObjectMgr.LoadTrainerGreetings();
+    SendSysMessage("DB table `npc_trainer_greeting` reloaded.");
+    return true;
+}
+
 bool ChatHandler::HandleReloadLootTemplatesCreatureCommand(char* /*args*/)
 {
     sLog.outString("Re-Loading Loot Tables... (`creature_loot_template`)");
@@ -4759,13 +4767,7 @@ bool ChatHandler::HandleChangeWeatherCommand(char* args)
 
     Player* player = m_session->GetPlayer();
     uint32 zoneId = player->GetZoneId();
-    if (!sWeatherMgr.GetWeatherChances(zoneId))
-    {
-        SendSysMessage(LANG_NO_WEATHER);
-        SetSentErrorMessage(true);
-    }
     player->GetMap()->SetWeather(zoneId, (WeatherType)type, grade, false);
-
     return true;
 }
 

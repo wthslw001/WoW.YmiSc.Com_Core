@@ -1167,16 +1167,20 @@ void Unit::Kill(Unit* pVictim, SpellEntry const *spellProto, bool durabilityLoss
                 creature->lootForPickPocketed = false;
 
             loot->clear();
-            if (!(creature->AI() && creature->AI()->FillLoot(loot, looter)))
-            {
-                if (uint32 lootid = creature->GetCreatureInfo()->lootid)
-                {
-                    loot->SetTeam(group_tap ? group_tap->GetTeam() : looter->GetTeam());
-                    loot->FillLoot(lootid, LootTemplates_Creature, looter, false, false, creature);
-                }
-            }
 
-            loot->generateMoneyLoot(creature->GetCreatureInfo()->mingold, creature->GetCreatureInfo()->maxgold);
+            if (creature->CanHaveLoot(looter))
+            {
+                if (!(creature->AI() && creature->AI()->FillLoot(loot, looter)))
+                {
+                    if (uint32 lootid = creature->GetCreatureInfo()->lootid)
+                    {
+                        loot->SetTeam(group_tap ? group_tap->GetTeam() : looter->GetTeam());
+                        loot->FillLoot(lootid, LootTemplates_Creature, looter, false, false, creature);
+                    }
+                }
+
+                loot->generateMoneyLoot(creature->GetCreatureInfo()->mingold, creature->GetCreatureInfo()->maxgold);
+            }
         }
 
         if (group_tap)
@@ -4759,17 +4763,6 @@ void Unit::RemoveNotOwnSingleTargetAuras()
 
 }
 
-void Unit::DeleteAuraHolder(SpellAuraHolder *holder)
-{
-    if (holder->IsInUse())
-    {
-        holder->SetDeleted();
-        m_deletedHolders.push_back(holder);
-    }
-    else
-        delete holder;
-}
-
 void Unit::RemoveSpellAuraHolder(SpellAuraHolder *holder, AuraRemoveMode mode)
 {
     // Statue unsummoned at holder remove
@@ -4819,7 +4812,13 @@ void Unit::RemoveSpellAuraHolder(SpellAuraHolder *holder, AuraRemoveMode mode)
 
     // If holder in use (removed from code that plan access to it data after return)
     // store it in holder list with delayed deletion
-    DeleteAuraHolder(holder);
+    if (holder->IsInUse())
+    {
+        holder->SetDeleted();
+        m_deletedHolders.push_back(holder);
+    }
+    else
+        delete holder;
 
     if (isChanneled && caster)
     {

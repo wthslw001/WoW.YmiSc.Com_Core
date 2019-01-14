@@ -3926,23 +3926,25 @@ void Spell::EffectTameCreature(SpellEffectIndex /*eff_idx*/)
 
 void Spell::EffectSummonPet(SpellEffectIndex eff_idx)
 {
-    ObjectGuid petGuid = m_caster->EffectSummonPet(m_spellInfo->Id, m_spellInfo->EffectMiscValue[eff_idx]);
+    uint32 petLevel = m_caster->IsPlayer() ? m_caster->getLevel() : std::max(int32(m_caster->getLevel()) + int32(m_spellInfo->EffectMultipleValue[eff_idx]), 1);
+
+    ObjectGuid petGuid = m_caster->EffectSummonPet(m_spellInfo->Id, m_spellInfo->EffectMiscValue[eff_idx], petLevel);
     if (petGuid)
         AddExecuteLogInfo(eff_idx, ExecuteLogInfo(petGuid));
 }
 
-ObjectGuid Unit::EffectSummonPet(uint32 spellId, uint32 petentry)
+ObjectGuid Unit::EffectSummonPet(uint32 spellId, uint32 petEntry, uint32 petLevel)
 {
     Pet *OldSummon = GetPet();
 
     // if pet requested type already exist
     if (OldSummon)
     {
-        if (petentry == 0 || OldSummon->GetEntry() == petentry)
+        if (petEntry == 0 || OldSummon->GetEntry() == petEntry)
         {
             if (OldSummon->isDead())
             {
-                if (petentry) // Warlock pet
+                if (petEntry) // Warlock pet
                     OldSummon->Unsummon(PET_SAVE_NOT_IN_SLOT);
                 else
                     return ObjectGuid(); // pet in corpse state can't be summoned
@@ -3956,19 +3958,19 @@ ObjectGuid Unit::EffectSummonPet(uint32 spellId, uint32 petentry)
             return ObjectGuid();
     }
 
-    CreatureInfo const* cInfo = petentry ? sCreatureStorage.LookupEntry<CreatureInfo>(petentry) : NULL;
+    CreatureInfo const* cInfo = petEntry ? sCreatureStorage.LookupEntry<CreatureInfo>(petEntry) : NULL;
 
     // == 0 in case call current pet, check only real summon case
-    if (petentry && !cInfo)
+    if (petEntry && !cInfo)
     {
-        sLog.outErrorDb("EffectSummonPet: creature entry %u not found for spell %u.", petentry, spellId);
+        sLog.outErrorDb("EffectSummonPet: creature entry %u not found for spell %u.", petEntry, spellId);
         return ObjectGuid();
     }
 
     Pet* NewSummon = new Pet;
 
-    // petentry==0 for hunter "call pet" (current pet summoned if any)
-    if (GetTypeId() == TYPEID_PLAYER && NewSummon->LoadPetFromDB((Player*)this, petentry))
+    // petEntry==0 for hunter "call pet" (current pet summoned if any)
+    if (GetTypeId() == TYPEID_PLAYER && NewSummon->LoadPetFromDB((Player*)this, petEntry))
     {
         if (NewSummon->getPetType() == SUMMON_PET)
         {
@@ -3989,7 +3991,7 @@ ObjectGuid Unit::EffectSummonPet(uint32 spellId, uint32 petentry)
     }
 
     // not error in case fail hunter call pet
-    if (!petentry)
+    if (!petEntry)
     {
         delete NewSummon;
         return ObjectGuid();
@@ -4005,7 +4007,6 @@ ObjectGuid Unit::EffectSummonPet(uint32 spellId, uint32 petentry)
         return ObjectGuid();
     }
 
-    uint32 petlevel = getLevel();
     NewSummon->SetSummonPoint(pos);
 
     NewSummon->setPetType(SUMMON_PET);
@@ -4033,7 +4034,7 @@ ObjectGuid Unit::EffectSummonPet(uint32 spellId, uint32 petentry)
     if (IsPvP())
         NewSummon->SetPvP(true);
 
-    NewSummon->InitStatsForLevel(petlevel, this);
+    NewSummon->InitStatsForLevel(petLevel, this);
     NewSummon->InitPetCreateSpells();
 
     if (NewSummon->getPetType() == SUMMON_PET)
@@ -4052,7 +4053,7 @@ ObjectGuid Unit::EffectSummonPet(uint32 spellId, uint32 petentry)
         }
 
         // generate new name for summon pet
-        std::string new_name = sObjectMgr.GeneratePetName(petentry);
+        std::string new_name = sObjectMgr.GeneratePetName(petEntry);
         if (!new_name.empty())
             NewSummon->SetName(new_name);
     }
@@ -6365,7 +6366,8 @@ void Spell::EffectSpiritHeal(SpellEffectIndex /*eff_idx*/)
 void Spell::EffectSkinPlayerCorpse(SpellEffectIndex eff_idx)
 {
     DEBUG_LOG("Effect: SkinPlayerCorpse");
-    if (m_caster->GetTypeId() != TYPEID_PLAYER)
+    Player* playerCaster = m_caster->ToPlayer();
+    if (!playerCaster)
         return;
 
     Unit *target = unitTarget;
@@ -6374,8 +6376,8 @@ void Spell::EffectSkinPlayerCorpse(SpellEffectIndex eff_idx)
     if (!target)
     {
         ASSERT(corpseTarget);
-        Corpse *bones = sObjectAccessor.ConvertCorpseForPlayer(corpseTarget->GetOwnerGuid(), true);
-        m_caster->ToPlayer()->SendLoot((bones?bones:corpseTarget)->GetObjectGuid(), LOOT_INSIGNIA);
+        sObjectAccessor.ConvertCorpseForPlayer(corpseTarget->GetOwnerGuid(), playerCaster);
+        playerCaster->SendLoot(corpseTarget->GetObjectGuid(), LOOT_INSIGNIA);
         DEBUG_LOG("Effect SkinPlayerCorpse: corpse owner was not found");
         return;
     }
@@ -6383,7 +6385,7 @@ void Spell::EffectSkinPlayerCorpse(SpellEffectIndex eff_idx)
     if (target->GetTypeId() != TYPEID_PLAYER || target->isAlive())
         return;
 
-    ((Player*)target)->RemovedInsignia((Player*)m_caster, corpseTarget);
+    ((Player*)target)->RemovedInsignia(playerCaster, corpseTarget);
 
     AddExecuteLogInfo(eff_idx, ExecuteLogInfo(target->GetObjectGuid()));
 }

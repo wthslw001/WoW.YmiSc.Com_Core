@@ -604,7 +604,12 @@ class MANGOS_DLL_SPEC Map : public GridRefManager<NGridType>, public MaNGOS::Obj
 
         // Get Holder for Creature Linking
         CreatureLinkingHolder* GetCreatureLinkingHolder() { return &m_creatureLinkingHolder; }
+
+        void AddCorpseToRemove(Corpse* corpse, ObjectGuid looter_guid);
         GameObject* SummonGameObject(uint32 entry, float x, float y, float z, float ang, float rotation0, float rotation1, float rotation2, float rotation3, uint32 respawnTime, uint32 worldMask);
+
+        bool ShouldUpdateMap(uint32 now, uint32 inactiveTimeLimit);
+        uint32 GetLastMapUpdate() const { return _lastMapUpdate; }
 
     private:
         void LoadMapAndVMap(int gx, int gy);
@@ -658,6 +663,17 @@ class MANGOS_DLL_SPEC Map : public GridRefManager<NGridType>, public MaNGOS::Obj
 
         mutable MapMutexType    unitsMvtUpdate_lock;
         std::set<Unit*>         unitsMvtUpdate;
+
+        mutable MapMutexType    _corpseRemovalLock;
+        typedef std::list<std::pair<Corpse*, ObjectGuid>> CorpseRemoveList;
+        CorpseRemoveList        _corpseToRemove;
+
+        MapMutexType            _bonesLock;
+        uint32                  _bonesCleanupTimer;
+        std::list<Corpse*>      _bones;
+
+        void RemoveCorpses(bool unload = false);
+        void RemoveOldBones(const uint32 diff);
 
     protected:
         MapEntry const* i_mapEntry;
@@ -822,6 +838,7 @@ class MANGOS_DLL_SPEC Map : public GridRefManager<NGridType>, public MaNGOS::Obj
         bool ScriptCommand_AssistUnit(const ScriptInfo& script, WorldObject* source, WorldObject* target);
         bool ScriptCommand_CombatStop(const ScriptInfo& script, WorldObject* source, WorldObject* target);
         bool ScriptCommand_AddAura(const ScriptInfo& script, WorldObject* source, WorldObject* target);
+        bool ScriptCommand_AddThreat(const ScriptInfo& script, WorldObject* source, WorldObject* target);
 
         // Add any new script command functions to the array.
         const ScriptCommandFunction m_ScriptCommands[SCRIPT_COMMAND_MAX] =
@@ -901,6 +918,7 @@ class MANGOS_DLL_SPEC Map : public GridRefManager<NGridType>, public MaNGOS::Obj
             &Map::ScriptCommand_AssistUnit,             // 72
             &Map::ScriptCommand_CombatStop,             // 73
             &Map::ScriptCommand_AddAura,                // 74
+            &Map::ScriptCommand_AddThreat,              // 75
         };
 
     public:

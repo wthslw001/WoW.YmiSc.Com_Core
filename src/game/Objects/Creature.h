@@ -66,6 +66,7 @@ enum CreatureFlagsExtra
     CREATURE_FLAG_EXTRA_IMMUNE_AOE                   = 0x00004000,       // creature is immune to AoE
     CREATURE_FLAG_EXTRA_CHASE_GEN_NO_BACKING         = 0x00008000,       // creature does not move back when target is within bounding radius
     CREATURE_FLAG_EXTRA_NO_ASSIST                    = 0x00010000,       // creature does not aggro when nearby creatures aggro
+    CREATURE_FLAG_EXTRA_SINGLE_LOOT_GENERATION       = 0x00020000        // creature will only generate loot once - no loot after subsequent deaths
 };
 
 // GCC have alternative #pragma pack(N) syntax and old gcc version not support pack(push,N), also any gcc version not support it at some platform
@@ -183,15 +184,6 @@ struct EquipmentInfo
 {
     uint32  entry;
     uint32  equipentry[3];
-};
-
-// depricated old way
-struct EquipmentInfoRaw
-{
-    uint32  entry;
-    uint32  equipmodel[3];
-    uint32  equipinfo[3];
-    uint32  equipslot[3];
 };
 
 // from `creature` table
@@ -668,6 +660,7 @@ class MANGOS_DLL_SPEC Creature : public Unit
         Player* GetOriginalLootRecipient() const;           // ignore group changes/etc, not for looting
         bool IsTappedBy(Player const* player) const;
         bool IsSkinnableBy(Player const* player) const { return !skinningForOthersTimer || IsTappedBy(player); }
+        bool CanHaveLoot(Player const* player) const;
 
         SpellEntry const *ReachWithSpellAttack(Unit *pVictim);
         SpellEntry const *ReachWithSpellCure(Unit *pVictim);
@@ -834,7 +827,6 @@ class MANGOS_DLL_SPEC Creature : public Unit
         void RegenerateMana();
 
         void SetVirtualItem(VirtualItemSlot slot, uint32 item_id);
-        void SetVirtualItemRaw(VirtualItemSlot slot, uint32 display_id, uint32 info0, uint32 info1);
 
         void ResetDamageTakenOrigin()
         {
@@ -953,6 +945,8 @@ class MANGOS_DLL_SPEC Creature : public Unit
         float m_callForHelpDist;
 
         bool _isEscortable;
+        bool _hasDied;
+        bool _hasDiedAndRespawned;
 
     private:
         GridReference<Creature> m_gridRef;

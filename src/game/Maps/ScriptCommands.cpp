@@ -405,20 +405,24 @@ bool Map::ScriptCommand_SummonCreature(const ScriptInfo& script, WorldObject* so
     {
         case TARGET_T_OWNER_OR_SELF:
             break;
-        case TARGET_T_PROVIDED_TARGET:
-        {
-            if (Unit* pAttackTarget = ToUnit(target))
-                if (pCreature->AI())
-                    pCreature->AI()->AttackStart(pAttackTarget);
-            break;
-        }
         default:
         {
             if (Creature* pCreatureSummoner = pSummoner->ToCreature())
             {
-                if (Unit* pAttackTarget = ToUnit(GetTargetByType(pCreatureSummoner, nullptr, script.summonCreature.attackTarget)))
+                if (Unit* pAttackTarget = ToUnit(GetTargetByType(pCreatureSummoner, ToUnit(target), script.summonCreature.attackTarget)))
+                {
                     if (pCreature->AI())
+                    {
+                        // Hack: there is a visual bug where the melee animation
+                        // does not play for summoned units if they enter combat
+                        // immediately and their target is within melee range.
+                        // Sending the packet a second time fixes the animation.
+                        if (pCreature->AI()->IsMeleeAttackEnabled())
+                            pCreature->SendMeleeAttackStart(pAttackTarget);
+
                         pCreature->AI()->AttackStart(pAttackTarget);
+                    }
+                }
             }
         }
     }
@@ -1973,9 +1977,6 @@ bool Map::ScriptCommand_AssistUnit(const ScriptInfo& script, WorldObject* source
         return ShouldAbortScript(script);
     }
 
-    if (pSource->getVictim())
-        return false;
-
     Unit* pTarget = ToUnit(target);
 
     if (!pTarget)
@@ -1984,10 +1985,23 @@ bool Map::ScriptCommand_AssistUnit(const ScriptInfo& script, WorldObject* source
         return ShouldAbortScript(script);
     }
 
-    if (Unit* pAttacker = pTarget->getAttackerForHelper())
+    Unit* pAttacker = pTarget->getAttackerForHelper();
+
+    if (!pAttacker)
+        return false;
+
+    if (Unit* pVictim = pSource->getVictim())
     {
+        if (pVictim == pAttacker)
+            return false;
+
         if (!pSource->IsFriendlyTo(pAttacker) && pSource->IsWithinDistInMap(pAttacker, 40.0f))
             pSource->AddThreat(pAttacker);
+    }
+    else
+    {
+        if (pSource->AI() && !pSource->IsFriendlyTo(pAttacker) && pSource->IsWithinDistInMap(pAttacker, 40.0f))
+            pSource->AI()->AttackStart(pAttacker);
     }
 
     return false;
@@ -2025,6 +2039,34 @@ bool Map::ScriptCommand_AddAura(const ScriptInfo& script, WorldObject* source, W
     }
 
     pSource->AddAura(script.addAura.spellId, script.addAura.flags);
+
+    return false;
+}
+
+// SCRIPT_COMMAND_ADD_THREAT (75)
+bool Map::ScriptCommand_AddThreat(const ScriptInfo& script, WorldObject* source, WorldObject* target)
+{
+    Creature* pSource = ToCreature(source);
+
+    if (!pSource)
+    {
+        sLog.outError("SCRIPT_COMMAND_ADD_THREAT (script id %u) call for a NULL or non-creature source (TypeId: %u), skipping.", script.id, source ? source->GetTypeId() : 0);
+        return ShouldAbortScript(script);
+    }
+
+    if (!pSource->isInCombat() || !pSource->isAlive())
+        return false;
+
+    Unit* pTarget = ToUnit(target);
+
+    if (!pTarget)
+    {
+        sLog.outError("SCRIPT_COMMAND_ADD_THREAT (script id %u) call for a NULL or non-unit target (TypeId: %u), skipping.", script.id, target ? target->GetTypeId() : 0);
+        return ShouldAbortScript(script);
+    }
+
+    if (pTarget->isAlive() && !pSource->IsFriendlyTo(pTarget))
+        pSource->AddThreat(pTarget);
 
     return false;
 }

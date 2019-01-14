@@ -4238,15 +4238,7 @@ void Spell::SendCastResult(Player* caster, SpellEntry const* spellInfo, SpellCas
                 data << uint32(spellInfo->RequiresSpellFocus);
                 break;
             case SPELL_FAILED_REQUIRES_AREA:
-                switch (spellInfo->Id)
-                {
-                    case 22564:
-                    case 22563:
-                    case 23538:
-                    case 23539:
-                        data << uint32(2597);
-                        break;
-                }
+                data << uint32(sSpellMgr.GetRequiredAreaForSpell(spellInfo->Id));
                 break;
             case SPELL_FAILED_EQUIPPED_ITEM_CLASS:
                 data << uint32(spellInfo->EquippedItemClass);
@@ -5005,7 +4997,8 @@ void Spell::HandleEffects(Unit *pUnitTarget, Item *pItemTarget, GameObject *pGOT
     if (eff < TOTAL_SPELL_EFFECTS)
         (*this.*SpellEffects[eff])(i);
     else
-        sLog.outError("WORLD: Spell FX %d > TOTAL_SPELL_EFFECTS ", eff);
+        sLog.outError("WORLD: Spell %u has effect %d at index %u > TOTAL_SPELL_EFFECTS",
+            m_spellInfo->Id, eff, i);
 }
 
 void Spell::AddTriggeredSpell(uint32 spellId)
@@ -5115,7 +5108,7 @@ SpellCastResult Spell::CheckCast(bool strict)
      */
 
     uint32 spellCat = m_spellInfo->Category;
-    if (m_IsCastByItem)
+    if (m_CastItem)
     {
         // Find correct item category matching the current spell on item
         // used when item spells have custom categories due to wrong category
@@ -5190,12 +5183,11 @@ SpellCastResult Spell::CheckCast(bool strict)
             sWorld.getConfig(CONFIG_BOOL_VMAP_INDOOR_CHECK) &&
             VMAP::VMapFactory::createOrGetVMapManager()->isLineOfSightCalcEnabled())
     {
-        if (m_spellInfo->Attributes & SPELL_ATTR_OUTDOORS_ONLY &&
-                !m_caster->GetTerrain()->IsOutdoors(m_caster->GetPositionX(), m_caster->GetPositionY(), m_caster->GetPositionZ()))
+        auto isOutdoors = m_caster->GetTerrain()->IsOutdoors(m_caster->GetPositionX(), m_caster->GetPositionY(), m_caster->GetPositionZ());
+        if (m_spellInfo->Attributes & SPELL_ATTR_OUTDOORS_ONLY && !isOutdoors)
             return SPELL_FAILED_ONLY_OUTDOORS;
 
-        if (m_spellInfo->Attributes & SPELL_ATTR_INDOORS_ONLY &&
-                m_caster->GetTerrain()->IsOutdoors(m_caster->GetPositionX(), m_caster->GetPositionY(), m_caster->GetPositionZ()))
+        if (m_spellInfo->Attributes & SPELL_ATTR_INDOORS_ONLY && isOutdoors)
             return SPELL_FAILED_ONLY_INDOORS;
     }
 

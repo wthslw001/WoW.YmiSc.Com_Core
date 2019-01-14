@@ -40,7 +40,7 @@ class MANGOS_DLL_SPEC TargetedMovementGeneratorMedium
     protected:
         TargetedMovementGeneratorMedium(Unit &target, float offset, float angle) :
             TargetedMovementGeneratorBase(target), i_recheckDistance(0), i_recheckBoundingRadius(0), i_offset(offset),
-            i_angle(angle), i_recalculateTravel(false), i_targetReached(false), i_backing_up(false), i_can_spread(true),
+            i_angle(angle), i_recalculateTravel(false), i_targetReached(false), i_backing_up(false),
             i_reachable(true), _targetLastX(0), _targetLastY(0), _targetLastZ(0), _targetOnTransport(false)
         {
         }
@@ -71,14 +71,12 @@ class MANGOS_DLL_SPEC TargetedMovementGeneratorMedium
         bool i_targetReached : 1;
         bool i_reachable;
         bool i_backing_up;
-        bool i_can_spread;
         float _targetLastX;
         float _targetLastY;
         float _targetLastZ;
         bool  _targetOnTransport;
     private:
         void DoBackMovement(T &, Unit* target);
-        void DoSpreadIfNeeded(T &, Unit* target);
         bool TargetDeepInBounds(T &, Unit* target) const;
         bool TargetWithinBoundsPercentDistance(T &, Unit* target, float pct) const;
 };

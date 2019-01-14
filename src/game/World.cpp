@@ -964,6 +964,10 @@ void World::LoadNostalriusConfig(bool reload)
     setConfig(CONFIG_UINT32_CHANNEL_INVITE_MIN_LEVEL,                   "ChannelInvite.MinLevel", 10);
     setConfig(CONFIG_BOOL_WHISPER_RESTRICTION,                          "WhisperRestriction", false);
     setConfig(CONFIG_UINT32_WORLD_CHAN_MIN_LEVEL,                       "WorldChan.MinLevel", 0);
+    setConfig(CONFIG_UINT32_WORLD_CHAN_CD,                              "WorldChan.Cooldown", 0);
+    setConfig(CONFIG_UINT32_WORLD_CHAN_CD_MAX_LEVEL,                    "WorldChan.CooldownMaxLevel", 0);
+    setConfig(CONFIG_UINT32_WORLD_CHAN_CD_SCALING,                      "WorldChan.CooldownScaling", 0);
+    setConfig(CONFIG_UINT32_WORLD_CHAN_CD_USE_ACCOUNT_MAX_LEVEL,        "WorldChan.CooldownUseAccountLevel", 0);
     setConfig(CONFIG_UINT32_SAY_MIN_LEVEL,                              "SayMinLevel", 0);
     setConfig(CONFIG_UINT32_YELL_MIN_LEVEL,                             "YellMinLevel", 0);
     setConfig(CONFIG_UINT32_SAY_EMOTE_MIN_LEVEL,                        "SayEmoteMinLevel", 0);
@@ -1172,7 +1176,7 @@ void World::SetInitialWorldSettings()
 
     ///- Load the DBC files
     sLog.outString("Initialize data stores...");
-    LoadDBCStores(m_dataPath + std::to_string(SUPPORTED_CLIENT_BUILD) + std::string("\\"));
+    LoadDBCStores(m_dataPath);
     DetectDBCLang();
     sObjectMgr.SetDBCLocaleIndex(GetDefaultDbcLocale());    // Get once for all the locale index of DBC language (console/broadcasts)
 
@@ -1336,6 +1340,10 @@ void World::SetInitialWorldSettings()
 
     sLog.outString("Loading Quests Greetings...");          // must be loaded after creature_template
     sObjectMgr.LoadQuestGreetings();
+    sLog.outString();
+
+    sLog.outString("Loading Trainer Greetings...");
+    sObjectMgr.LoadTrainerGreetings();
     sLog.outString();
 
     sLog.outString("Loading Game Event Data...");           // must be after sPoolMgr.LoadFromDB and quests to properly load pool events and quests for events, but before area trigger teleports

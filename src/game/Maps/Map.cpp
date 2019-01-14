@@ -77,6 +77,9 @@ Map::~Map()
     if (m_TerrainData->Release())
         sTerrainMgr.UnloadTerrain(m_TerrainData->GetMapId());
 
+    if (_corpseToRemove.size() > 0)
+        sLog.outError("[MAP] Map %u (instance %u) deleted while there are still corpses to remove", GetId(), GetInstanceId());
+
     delete m_weatherSystem;
     m_weatherSystem = NULL;
 }
@@ -103,7 +106,7 @@ Map::Map(uint32 id, time_t expiry, uint32 InstanceId)
       _lastPlayersUpdate(WorldTimer::getMSTime()), _lastMapUpdate(WorldTimer::getMSTime()),
       _lastCellsUpdate(WorldTimer::getMSTime()), _inactivePlayersSkippedUpdates(0),
       _objUpdatesThreads(0), _unitRelocationThreads(0), _lastPlayerLeftTime(0),
-      m_lastMvtSpellsUpdate(0), m_uiScriptedEventsTimer(1000)
+      m_lastMvtSpellsUpdate(0), _bonesCleanupTimer(0), m_uiScriptedEventsTimer(1000)
 {
     m_CreatureGuids.Set(sObjectMgr.GetFirstTemporaryCreatureLowGuid());
     m_GameObjectGuids.Set(sObjectMgr.GetFirstTemporaryGameObjectLowGuid());
@@ -904,6 +907,9 @@ void Map::Update(uint32 t_diff)
     UpdatePlayers();
     uint32 playersUpdateTime2 = WorldTimer::getMSTimeDiffToNow(updateMapTime) - objectsUpdateTime - activeCellsUpdateTime - playersUpdateTime - sessionsUpdateTime - visibilityUpdateTime;
 
+    RemoveCorpses();
+    RemoveOldBones(t_diff);
+
     updateMapTime = WorldTimer::getMSTimeDiffToNow(updateMapTime);
 
     uint32 additionnalWaitTime = 0;
@@ -1445,6 +1451,8 @@ bool Map::UnloadGrid(const uint32 &x, const uint32 &y, bool pForce)
 void Map::UnloadAll(bool pForce)
 {
     m_unloading = true;
+    RemoveCorpses(true);
+
     for (GridRefManager<NGridType>::iterator i = GridRefManager<NGridType>::begin(); i != GridRefManager<NGridType>::end();)
     {
         NGridType &grid(*i->getSource());
@@ -1458,6 +1466,9 @@ void Map::UnloadAll(bool pForce)
 
         Remove<Transport>(transport, true);
     }
+
+    // Bones are already added to the grid, and hence deleted when unloading
+    _bones.clear();
 }
 
 bool Map::CheckGridIntegrity(Creature* c, bool moved) const
@@ -3345,6 +3356,7 @@ VMAP::ModelInstance* Map::FindCollisionModel(float x1, float y1, float z1, float
 
 void Map::CrashUnload()
 {
+    sLog.outError("Map %u (instance %u) crashed. Has players: %d", GetId(), GetInstanceId(), HavePlayers());
     /// Logout players
     for (m_mapRefIter = m_mapRefManager.begin(); m_mapRefIter != m_mapRefManager.end(); ++m_mapRefIter)
     {
@@ -3359,7 +3371,11 @@ void Map::CrashUnload()
             player->UninviteFromGroup();
 
             if (player->GetSocial())
+            {
                 sSocialMgr.RemovePlayerSocial(player->GetGUIDLow());
+                session->GetMasterPlayer()->SetSocial(nullptr);
+            }
+
             if (false)
                 delete player; // May crash if player is corrupted
             else
@@ -3423,6 +3439,154 @@ void Map::PrintInfos(ChatHandler& handler)
     handler.PSendSysMessage("%u objects relocated [%u threads]", i_unitsRelocated.size(), _unitRelocationThreads);
     handler.PSendSysMessage("%u scripts scheduled", m_scriptSchedule.size());
     handler.PSendSysMessage("Vis:%.1f Act:%.1f", m_VisibleDistance, m_GridActivationDistance);
+}
+
+bool Map::ShouldUpdateMap(uint32 now, uint32 inactiveTimeLimit)
+{
+    auto update = true;
+
+    if (!HavePlayers() && inactiveTimeLimit)
+    {
+        if (WorldTimer::getMSTimeDiff(_lastPlayerLeftTime, now) > inactiveTimeLimit)
+            update = false;
+    }
+
+    // If we have corpses to be removed, we should force an update of the map.
+    // Otherwise players may die elsewhere and generate another corpse while
+    // this one still exists. If the server crashes before the map unloads,
+    // they'll have two active corpses. We can't immediately remove the corpse
+    // in AddCorpseToRemove because it can be called concurrently.
+    if (!update)
+    {
+        ACE_Guard<MapMutexType> guard(_corpseRemovalLock);
+        if (_corpseToRemove.size() > 0)
+            update = true;
+    }
+
+    return update;
+}
+
+/**
+ * Add a corpse to be removed, conditionally spawning bones in its place.
+ * May be called from other maps or threads
+ */
+void Map::AddCorpseToRemove(Corpse* corpse, ObjectGuid looter_guid)
+{
+    ACE_Guard<MapMutexType> guard(_corpseRemovalLock);
+    _corpseToRemove.emplace_back(corpse, looter_guid);
+}
+
+/**
+ * Remove any recovered corpses in the map.
+ */
+void Map::RemoveCorpses(bool unload)
+{
+    ACE_Guard<MapMutexType> guard(_corpseRemovalLock);
+    for (auto iter = _corpseToRemove.begin(); iter != _corpseToRemove.end();)
+    {
+        auto corpse = iter->first;
+        auto& looterGuid = iter->second;
+
+        Remove(corpse, false);
+
+        const ObjectGuid& player_guid = corpse->GetOwnerGuid();
+        Player* owner = GetPlayer(player_guid);
+
+        bool mapSpawnsBones = IsBattleGround() ? sWorld.getConfig(CONFIG_BOOL_DEATH_BONES_BG) : sWorld.getConfig(CONFIG_BOOL_DEATH_BONES_WORLD);
+        // Create the bones only if the map and the grid is loaded at the corpse's location
+        // Don't spawn bones if the map is unloading
+        if ((looterGuid || mapSpawnsBones) && !unload && !IsRemovalGrid(corpse->GetPositionX(), corpse->GetPositionY()))
+        {
+            // Create bones, don't change Corpse
+            Corpse* bones = new Corpse;
+            bones->Create(corpse->GetGUIDLow());
+            if (owner)
+            {
+                bones->SetFactionTemplate(owner->getFactionTemplateEntry());
+                if (looterGuid)
+                {
+                    // Notify the client that the corpse is gone
+                    WorldPacket cdata(MSG_CORPSE_QUERY, 1);
+                    cdata << uint8(0);
+                    owner->GetSession()->SendPacket(&cdata);
+                }
+            }
+
+            for (int i = 3; i < CORPSE_END; ++i)                    // don't overwrite guid and object type
+                bones->SetUInt32Value(i, corpse->GetUInt32Value(i));
+
+            bones->SetGrid(corpse->GetGrid());
+            bones->Relocate(corpse->GetPositionX(), corpse->GetPositionY(), corpse->GetPositionZ(), corpse->GetOrientation());
+
+            bones->SetUInt32Value(CORPSE_FIELD_FLAGS, CORPSE_FLAG_UNK2 | CORPSE_FLAG_BONES);
+            bones->SetGuidValue(CORPSE_FIELD_OWNER, player_guid);
+
+            for (int i = 0; i < EQUIPMENT_SLOT_END; ++i)
+            {
+                if (corpse->GetUInt32Value(CORPSE_FIELD_ITEM + i))
+                    bones->SetUInt32Value(CORPSE_FIELD_ITEM + i, 0);
+            }
+
+            // add bones in grid store if grid loaded where corpse placed
+            Add(bones);
+
+            if (looterGuid)
+            {
+                // Now we must make bones lootable, and send player loot
+                bones->SetFlag(CORPSE_FIELD_DYNAMIC_FLAGS, CORPSE_DYNFLAG_LOOTABLE);
+
+                if (Player* looter = GetPlayer(looterGuid))
+                {
+                    bones->lootRecipient = looter;
+                    looter->SendLoot(bones->GetObjectGuid(), LOOT_INSIGNIA, owner);
+                }
+            }
+
+            // Only take the lock for a second
+            {
+                ACE_Guard<MapMutexType> guard(_bonesLock);
+                _bones.push_back(bones);
+            }
+        }
+
+        // Save player after corpse removal to prevent the player logging in
+        // with no corpse but as a ghost, unless we are logging out in which
+        // case a save is already scheduled
+        if (owner && !IsBattleGround() && !owner->GetSession()->PlayerLogoutWithSave())
+            owner->SaveToDB();
+
+        corpse->DeleteFromDB();
+        delete corpse;
+
+        iter = _corpseToRemove.erase(iter);
+    }
+}
+
+/**
+ * Cleanup any old bones. We don't need to check every update, instead let
+ * it be configurable
+ */
+void Map::RemoveOldBones(const uint32 diff)
+{
+    _bonesCleanupTimer += diff;
+    if (_bonesCleanupTimer < sWorld.GetWorldUpdateTimerInterval(WUPDATE_CORPSES))
+        return;
+
+    _bonesCleanupTimer = 0u;
+
+    time_t now = time(nullptr);
+    ACE_Guard<MapMutexType> guard(_bonesLock);
+    for (auto iter = _bones.begin(); iter != _bones.end();)
+    {
+        Corpse* bones = *iter;
+        if (bones->IsExpired(now))
+        {
+            Remove(bones, true);
+            iter = _bones.erase(iter);
+        }
+        else
+            ++iter;
+    }
 }
 
 GameObject* Map::SummonGameObject(uint32 entry, float x, float y, float z, float ang, float rotation0, float rotation1, float rotation2, float rotation3, uint32 respawnTime, uint32 worldMask)
